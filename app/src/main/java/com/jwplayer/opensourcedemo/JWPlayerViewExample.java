@@ -1,34 +1,38 @@
 package com.jwplayer.opensourcedemo;
 
+import android.annotation.SuppressLint;
 import android.content.Intent;
-import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
+import android.os.Build;
 import android.os.Bundle;
 import android.support.design.widget.CoordinatorLayout;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.AppCompatActivity;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
+import android.webkit.WebView;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.longtailvideo.jwplayer.JWPlayerView;
 import com.longtailvideo.jwplayer.cast.CastManager;
 import com.longtailvideo.jwplayer.configuration.PlayerConfig;
+import com.longtailvideo.jwplayer.events.ControlBarVisibilityEvent;
 import com.longtailvideo.jwplayer.events.FullscreenEvent;
 import com.longtailvideo.jwplayer.events.listeners.VideoPlayerEvents;
-import com.longtailvideo.jwplayer.media.ads.AdBreak;
-import com.longtailvideo.jwplayer.media.ads.AdSource;
-import com.longtailvideo.jwplayer.media.ads.Advertising;
-import com.longtailvideo.jwplayer.media.ads.ImaAdvertising;
 import com.longtailvideo.jwplayer.media.playlists.PlaylistItem;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class JWPlayerViewExample extends AppCompatActivity implements
-		VideoPlayerEvents.OnFullscreenListener {
+		VideoPlayerEvents.OnFullscreenListener,
+		VideoPlayerEvents.OnControlBarVisibilityListener{
 
 	/**
 	 * Reference to the {@link JWPlayerView}
@@ -51,9 +55,11 @@ public class JWPlayerViewExample extends AppCompatActivity implements
 	 */
 	private CoordinatorLayout mCoordinatorLayout;
 
+	private WebView webView;
+
 
 	@Override
-	protected void onCreate(Bundle savedInstanceState) {
+	protected void onCreate(Bundle savedInstanceState){
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_jwplayerview);
 
@@ -65,39 +71,93 @@ public class JWPlayerViewExample extends AppCompatActivity implements
 
 		// Handle hiding/showing of ActionBar
 		mPlayerView.addOnFullscreenListener(this);
+		mPlayerView.addOnControlBarVisibilityListener(this);
 
 		// Keep the screen on during playback
 		new KeepScreenOnHandler(mPlayerView, getWindow());
 
 		// Instantiate the JW Player event handler class
-		mEventHandler = new JWEventHandler(mPlayerView, outputTextView, scrollView);
+//		new JWEventHandler(mPlayerView, outputTextView, scrollView);
 
 		// Setup JWPlayer
 		setupJWPlayer();
+		webviewListener();
+
 
 		// Get a reference to the CastManager
 		mCastManager = CastManager.getInstance();
 	}
 
+	/*Will not work in min SDK verison 16*/
+	@SuppressLint({"AddJavascriptInterface", "SetJavaScriptEnabled", "JavascriptInterface" })
+	private void webviewListener() {
+
+		webView = new WebView(getWindow().getContext());
+		webView.getSettings().setJavaScriptEnabled(true);
+		webView.addJavascriptInterface(new MyQualitySettingsInterface(), "MyQualitySettingsInterface");
+		webView.loadData("", "text/html", null);
+		webView.loadUrl("javascript:MyQualitySettingsInterface.initializeQualitySettingsListener()");
+
+	}
+
+	public class MyQualitySettingsInterface {
+
+		String element = "";
+		boolean clicked = false;
+
+		@JavascriptInterface
+		public boolean isClicked() {
+			return clicked;
+		}
+
+		@JavascriptInterface
+		public String getElement() {
+			return element;
+		}
+
+		@JavascriptInterface
+		public void initializeQualitySettingsListener() {
+			Log.i("HYUNJOO", "initializeQualitySettingsListener()");
+			element = "window.document.getElementsByClassName('jw-icon jw-icon-inline jw-button-color jw-reset jw-icon-settings jw-settings-submenu-button')[0].addEventListener(\"click\",function(){" +
+					"clicked = true;" +
+					"});";
+			Toast.makeText(JWPlayerViewExample.this,"initializeQualitySettingsListener", Toast.LENGTH_LONG).show();
+		}
+
+		@JavascriptInterface
+		void print(){
+			Toast.makeText(JWPlayerViewExample.this,"Quality Settings Touched!", Toast.LENGTH_LONG).show();
+		}
+
+	}
+
+	@Override
+	public void onControlBarVisibilityChanged(ControlBarVisibilityEvent controlBarVisibilityEvent) {
+
+		String scriptToSeeElement = "javascript:(function(){ return MyQualitySettingsInterface.getElement(); })()"; // I know that the element is available
+
+		String script = "javascript:(function(){ return MyQualitySettingsInterface.isClicked(); })()";
+
+		// TODO: problem is the the click is not listened
+		if(controlBarVisibilityEvent.isVisible()){
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+				webView.evaluateJavascript(script, new ValueCallback<String>() {
+					@Override
+					public void onReceiveValue(String value) {
+						Log.i("HYUNJOO","onControlBar - OnReceived value: " + value);
+						if(value.equals("true")) Toast.makeText(JWPlayerViewExample.this, value, Toast.LENGTH_SHORT).show();
+					}
+				});
+			}
+		}
+	}
 
 	private void setupJWPlayer() {
 		List<PlaylistItem> playlistItemList = createPlaylist();
 
-		// Vast Vpaid tag Example
-//		List<AdBreak> adbreaklist = new ArrayList<>();
-//		String vpaid = "";
-//		adbreaklist.add(new AdBreak("pre", AdSource.VAST, vpaid));
-//		Advertising advertise = new Advertising(AdSource.VAST,adbreaklist);
-
-		// Ima tag Example
-		List<AdBreak> adbreaklist = new ArrayList<>();
-		String vpaid = "https://testing.streamboatserver.ch/20min/vastplayer/vast-axe-orig.xml";
-		adbreaklist.add(new AdBreak("pre", AdSource.VAST, vpaid));
-		Advertising advertise = new Advertising(AdSource.VAST,adbreaklist);
 
 		mPlayerView.setup(new PlayerConfig.Builder()
 					.playlist(playlistItemList)
-					.advertising(advertise)
 					.autostart(true)
 					.preload(true)
 					.build()
@@ -109,11 +169,6 @@ public class JWPlayerViewExample extends AppCompatActivity implements
 
 		String[] playlist = {
 				"https://cdn.jwplayer.com/manifests/jumBvHdL.m3u8",
-				"http://content.jwplatform.com/videos/tkM1zvBq-cIp6U8lV.mp4",
-				"http://content.jwplatform.com/videos/RDn7eg0o-cIp6U8lV.mp4",
-				"http://content.jwplatform.com/videos/i3q4gcBi-cIp6U8lV.mp4",
-				"http://content.jwplatform.com/videos/iLwfYW2S-cIp6U8lV.mp4",
-				"http://content.jwplatform.com/videos/8TbJTFy5-cIp6U8lV.mp4",
 				"http://playertest.longtailvideo.com/adaptive/bipbop/gear4/prog_index.m3u8"
 				};
 
